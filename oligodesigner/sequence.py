@@ -118,20 +118,29 @@ def get_homology_in_database(fasta, database, scopes='ensembl.transcript', num_t
     return seqid
 
 
+def self_hit_mask(df_blast, gene_id):
+    """
+    return a boolean Series aligned to df_blast. True marks a hit on the gene of interest,
+    judged by referring the gene information from mygene.
+    """
+    mg = mygene.MyGeneInfo()
+    transcript_series = df_blast['sseqid'].str.split('.').str[0]
+    df_transcript_id = pd.DataFrame(mg.querymany(transcript_series.drop_duplicates(keep='first'),
+                                                 scopes='ensembl.transcript', fields='id', verbose=False))
+
+    if not '_id' in df_transcript_id.columns:
+        return pd.Series(False, index=df_blast.index, name='self_hit')
+    else:
+        self_transcripts = df_transcript_id[df_transcript_id['_id'] == gene_id]['query']
+        return transcript_series.isin(self_transcripts).rename('self_hit')
+
+
 def exclude_self(df_blast, gene_id):
     """
     omit the gene of interest from the blast result
     by referring the gene information from mygene.
     """
-    mg = mygene.MyGeneInfo()
-    transcript_series = df_blast['sseqid'].str.split('.').str[0].drop_duplicates(keep='first')
-    df_transcript_id = pd.DataFrame(mg.querymany(transcript_series, scopes='ensembl.transcript', fields='id', verbose = False))
-    
-    if not '_id' in df_transcript_id.columns:
-        return df_blast
-    else:
-        df_selfrmv = df_blast[~df_blast['sseqid'].str.split('.').str[0].isin(df_transcript_id[df_transcript_id['_id']==gene_id]['query'])]
-        return df_selfrmv.reset_index(drop=True)
+    return df_blast[~self_hit_mask(df_blast, gene_id)].reset_index(drop=True)
 
 
 def get_off_targeting_oligo(minimum_offtarget_gap, df_blast):

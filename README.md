@@ -77,9 +77,16 @@ off-target analysis. Otherwise, the gene of your interest could be regarded as a
 Turn this to False when your template is not found in database (e.g. GFP).
 
 `export_blast`
-Optional, default False. Set export_blast True to save the BLAST result as `<fasta basename>_blast.csv` next to the input fasta file.
-The file has the 12 standard BLAST columns plus `self_hit`, which is True for hits on the template gene. Rows with `self_hit` True are excluded from the off-target analysis. All values are False when self_remove is False.
-This file is for debugging and is not needed for the oligo design.
+Optional, default False. Set export_blast True to save two debugging files next to the input fasta file. Neither is needed for the oligo design.
+
+`<fasta basename>_blast.csv` is the raw BLAST result: the 12 standard BLAST columns plus `self_hit`, which is True for hits on the template gene. Rows with `self_hit` True are excluded from the off-target analysis. All values are False when self_remove is False.
+
+`<fasta basename>_offtarget_screening.csv` is the log of the BLAST off-target screening. It lists every candidate oligo produced by OligoMiner, in the same orientation and with the same leading columns (`gene, oligo_id, seq, start, end`) as the oligo set csv, followed by the BLAST verdict:
+- `excluded`: True if the oligo was removed. An oligo is removed when it and another candidate bind the same non-self transcript within `minimum_offtarget_gap`, because such a pair of split probes could initiate HCR on that transcript.
+- `exclusion_sseqid`, `exclusion_sstart`, `exclusion_send`: the transcript and position on which that pair was found.
+- `exclusion_partner`, `exclusion_gap`: the other oligo(s) of the pair and the distance between the two binding sites, measured from the start of one site to the end of the other (the value compared against `minimum_offtarget_gap`).
+- `n_offtarget_hits`, `n_offtarget_transcripts`, `offtarget_sseqids`: how many non-self BLAST hits the oligo has, how many distinct transcripts they fall on, and the list of those transcripts (`;`-separated).
+- `n_self_hits`: number of BLAST hits on the template gene.
 
 
 

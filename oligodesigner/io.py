@@ -15,7 +15,8 @@ def gen_file_path(input_file):
     oligo_sets = os.path.join(result_dir, basename) + '_oligosets.csv'
     param_file = os.path.join(result_dir, basename) + '_parameters.csv'
     blast_result = os.path.join(result_dir, basename) + '_blast.csv'
-    return oligominer_fastq, oligominer_fasta, oligo_sets, param_file, blast_result
+    screening_result = os.path.join(result_dir, basename) + '_offtarget_screening.csv'
+    return oligominer_fastq, oligominer_fasta, oligo_sets, param_file, blast_result, screening_result
 
 
 def record_param(mFISH3D_param, oligominer_param, param_file):

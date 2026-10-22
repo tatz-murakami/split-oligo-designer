@@ -17,10 +17,13 @@ def generator(mFISH3D_param, oligominer_param, num_threads=1):
             'self_remove': Recommended: True. set self_remove True if you want to remove the template sequence from
                 off-target analysis. Otherwise, the gene of your interest could be regarded as an off-target product.
                 Turn this to False when your template is not found in database (e.g. GFP).
-            'export_blast': Optional, default False. Set True to write the BLAST result to
-                <fasta basename>_blast.csv next to the input fasta for debugging. The extra column 'self_hit'
-                is True for hits on the template gene, which are excluded from the off-target analysis.
-                All values are False when self_remove is False.
+            'export_blast': Optional, default False. Set True to write two debugging files next to the
+                input fasta. <fasta basename>_blast.csv is the raw BLAST result; its extra column 'self_hit'
+                is True for hits on the template gene, which are excluded from the off-target analysis
+                (all False when self_remove is False). <fasta basename>_offtarget_screening.csv lists every
+                OligoMiner candidate in the oligo set format, with 'excluded' and the reason: the
+                transcript ('exclusion_sseqid') and partner oligo ('exclusion_partner') that form a
+                potential off-target pair, plus all non-self transcripts the oligo hits ('offtarget_sseqids').
     """
     fasta = mFISH3D_param['fasta']
     database = mFISH3D_param['database']
@@ -30,7 +33,7 @@ def generator(mFISH3D_param, oligominer_param, num_threads=1):
     export_blast = mFISH3D_param.get('export_blast', False)
 
     # Make path to temp files and result file
-    (oligominer_fastq, oligominer_fasta, oligo_sets_path, param_path, blast_path) = io.gen_file_path(fasta)
+    (oligominer_fastq, oligominer_fasta, oligo_sets_path, param_path, blast_path, screening_path) = io.gen_file_path(fasta)
 
     # Save parameters to csv file.
     io.record_param(mFISH3D_param, oligominer_param, param_path)
@@ -59,15 +62,18 @@ def generator(mFISH3D_param, oligominer_param, num_threads=1):
     else:
         self_hit = pd.Series(False, index=df_blast.index, name='self_hit')
 
-    if export_blast:
-        df_blast.assign(self_hit=self_hit).to_csv(blast_path, index=False)
-
     # Exclude sequences that are homologous to the gene of a interest from the result
+    df_blast_all = df_blast
     df_blast = df_blast[~self_hit].reset_index(drop=True)
 
     # Remove combination if sstart and send are close enough and if they are rective combination.
-    oligo_to_be_removed = sequence.get_off_targeting_oligo(minimum_offtarget_gap, df_blast)
+    oligo_to_be_removed, exclusion_detail = sequence.get_off_targeting_oligo_detail(minimum_offtarget_gap, df_blast)
     print("These sequences were removed because BLAST detected potential off-target binding", oligo_to_be_removed)
+
+    if export_blast:
+        df_blast_all.assign(self_hit=self_hit).to_csv(blast_path, index=False)
+        sequence.candidate_report(oligominer_df, df_blast_all, self_hit, exclusion_detail).to_csv(
+            screening_path, index=False)
 
     oligo_df = sequence.remove_oligo(oligominer_df, oligo_to_be_removed)
 

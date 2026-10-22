@@ -143,11 +143,25 @@ def exclude_self(df_blast, gene_id):
     return df_blast[~self_hit_mask(df_blast, gene_id)].reset_index(drop=True)
 
 
-def get_off_targeting_oligo(minimum_offtarget_gap, df_blast):
+def get_off_targeting_oligo_detail(minimum_offtarget_gap, df_blast):
     """
+    Identify oligos that potentially cause an off-target signal and record why.
 
+    An oligo is flagged when it and another candidate hit the same (non-self) transcript
+    within minimum_offtarget_gap of each other, because such a pair of split probes can
+    initiate HCR on the off-target transcript.
+
+    Returns:
+        oligo_to_be_removed (list): qseqid of the flagged oligos, in the order they were flagged.
+        detail_df (DataFrame): one row per flagged oligo with columns
+            'oligo_id', 'exclusion_sseqid' (transcript on which the pair was found),
+            'exclusion_sstart', 'exclusion_send' (hit coordinates on that transcript),
+            'exclusion_partner' (neighbouring oligo(s) within the gap, ';'-joined),
+            'exclusion_gap' (distance to the nearest partner, measured from the start of one binding
+            site to the end of the other; this is the value compared against minimum_offtarget_gap).
     """
     oligo_to_be_removed = []
+    records = []
     df_nonspecific_oligo = df_blast[df_blast['sseqid'].duplicated(keep=False)]
     # check each oligo whether the oligo potentially causes a off-target signal
     for nonspecific_oligo in list(df_nonspecific_oligo['qseqid'].unique()):
@@ -170,7 +184,91 @@ def get_off_targeting_oligo(minimum_offtarget_gap, df_blast):
                 df_nonspecific_oligo = df_nonspecific_oligo[~(df_nonspecific_oligo['qseqid'] == nonspecific_oligo)]
                 # update the oligo list
                 oligo_to_be_removed.append(nonspecific_oligo)
+                records.append(_exclusion_record(nonspecific_oligo, nonspecific_gene, sstart_send,
+                                                 minimum_offtarget_gap))
+    detail_df = pd.DataFrame(records, columns=['oligo_id', 'exclusion_sseqid', 'exclusion_sstart',
+                                               'exclusion_send', 'exclusion_partner', 'exclusion_gap'])
+    return oligo_to_be_removed, detail_df
+
+
+def _exclusion_record(oligo_id, sseqid, sstart_send, minimum_offtarget_gap):
+    """
+    Build the reason record for one flagged oligo from the sorted hit table of one transcript.
+    sstart_send is indexed by qseqid and has columns sstart, send, dist_before, dist_after.
+    """
+    ids = list(sstart_send.index)
+    # the same oligo may hit the same transcript more than once; take the first flagged occurrence.
+    positions = [i for i, q in enumerate(ids) if q == oligo_id]
+    partners = []
+    gaps = []
+    for pos in positions:
+        row = sstart_send.iloc[pos]
+        if pos > 0 and abs(row['dist_before']) < minimum_offtarget_gap:
+            partners.append(ids[pos - 1])
+            gaps.append(abs(row['dist_before']))
+        if pos < len(ids) - 1 and abs(row['dist_after']) < minimum_offtarget_gap:
+            partners.append(ids[pos + 1])
+            gaps.append(abs(row['dist_after']))
+        if partners:
+            break
+    row = sstart_send.iloc[positions[0]]
+    return {'oligo_id': oligo_id,
+            'exclusion_sseqid': sseqid,
+            'exclusion_sstart': int(row['sstart']),
+            'exclusion_send': int(row['send']),
+            'exclusion_partner': ';'.join(dict.fromkeys(partners)),
+            'exclusion_gap': int(min(gaps)) if gaps else pd.NA}
+
+
+def get_off_targeting_oligo(minimum_offtarget_gap, df_blast):
+    """
+    Return the list of oligos that potentially cause an off-target signal.
+    See get_off_targeting_oligo_detail for the criterion and for the per-oligo reason.
+    """
+    oligo_to_be_removed, _ = get_off_targeting_oligo_detail(minimum_offtarget_gap, df_blast)
     return oligo_to_be_removed
+
+
+def candidate_report(oligominer_df, df_blast, self_hit, detail_df):
+    """
+    Build a debugging table with one row per OligoMiner candidate, in the same orientation and
+    with the same leading columns as the oligo set csv, followed by the BLAST verdict.
+
+    Arguments:
+        oligominer_df: dataframe from io.dataframe_from_oligominer (target orientation).
+        df_blast: the full BLAST result (before self hits are removed).
+        self_hit: boolean Series aligned to df_blast, True for hits on the gene of interest.
+        detail_df: second return value of get_off_targeting_oligo_detail.
+
+    Columns:
+        gene, oligo_id, seq (probe orientation), start, end,
+        excluded, exclusion_sseqid, exclusion_sstart, exclusion_send, exclusion_partner, exclusion_gap,
+        n_offtarget_hits, n_offtarget_transcripts, offtarget_sseqids (';'-joined), n_self_hits
+    """
+    report = oligominer_df.copy()
+    report['seq'] = report['seq'].apply(lambda x: str(x.reverse_complement()))
+
+    report['excluded'] = report['oligo_id'].isin(detail_df['oligo_id'])
+    report = report.merge(detail_df, on='oligo_id', how='left')
+
+    offtarget = df_blast[~self_hit]
+    grouped = offtarget.groupby('qseqid')['sseqid']
+    n_hits = grouped.size().rename('n_offtarget_hits')
+    n_transcripts = grouped.nunique().rename('n_offtarget_transcripts')
+    sseqids = grouped.apply(lambda s: ';'.join(s.drop_duplicates())).rename('offtarget_sseqids')
+    n_self = df_blast[self_hit].groupby('qseqid').size().rename('n_self_hits')
+
+    summary = pd.concat([n_hits, n_transcripts, sseqids, n_self], axis=1)
+    report = report.merge(summary, left_on='oligo_id', right_index=True, how='left')
+
+    for col in ['n_offtarget_hits', 'n_offtarget_transcripts', 'n_self_hits']:
+        report[col] = report[col].fillna(0).astype(int)
+    report['offtarget_sseqids'] = report['offtarget_sseqids'].fillna('')
+    report['exclusion_partner'] = report['exclusion_partner'].fillna('')
+    for col in ['exclusion_sstart', 'exclusion_send', 'exclusion_gap']:
+        report[col] = report[col].astype('Int64')
+
+    return report
 
 
 def remove_oligo(oligominer_df, oligo_to_be_removed):

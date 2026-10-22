@@ -60,7 +60,8 @@ mFISH3D_param = {
             'seq_even_r':'',
             'seq_odd_l':''
         },
-    'self_remove': True # set this True if your template sequence appears in database.
+    'self_remove': True, # set this True if your template sequence appears in database.
+    'export_blast': False # optional. set this True to save the BLAST result for debugging.
 }
 ```
 
@@ -74,6 +75,11 @@ The sequences of HCR fragments. The example design can be found in `./oligodesig
 Set self_remove True if you want to remove the template sequence from
 off-target analysis. Otherwise, the gene of your interest could be regarded as an off-target product.
 Turn this to False when your template is not found in database (e.g. GFP).
+
+`export_blast`
+Optional, default False. Set export_blast True to save the BLAST result as `<fasta basename>_blast.csv` next to the input fasta file.
+The file has the 12 standard BLAST columns plus `self_hit`, which is True for hits on the template gene. Rows with `self_hit` True are excluded from the off-target analysis. All values are False when self_remove is False.
+This file is for debugging and is not needed for the oligo design.
 
 
 

@@ -1,5 +1,6 @@
 database,./data/human_transcriptome/human_transcriptome_db
-fasta,/home/tmurakami/src/split-oligo-designer/data/slc17a7/slc17a7_hs.fasta
+export_blast,False
+fasta,./data/slc17a7/slc17a7_hs.fasta
 hcr_seqs,"{'seq_even_l': 'GAGGAGGGCAGCAAACGGaa', 'seq_odd_r': 'atGAAGAGTCTTCCTTTACG', 'seq_even_r': '', 'seq_odd_l': ''}"
 minimum_offtarget_gap,100
 self_remove,True
@@ -20,7 +21,7 @@ OverlapModeVal,False
 reportVal,True
 sal,390
 sp,1
-tm,0
+tm,20
 TM,100
 verbocity,False
 X,"AAAAAA,TTTTTT,CCCCCC,GGGGGG"

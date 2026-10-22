@@ -6,7 +6,7 @@ Note: only the first failure encountered is reported. The order of checks is 'N'
 0 of 240 / 0.0000% of sequence windows examined were skipped due to interspersed 'N' bases
 0 of 240 / 0.0000% of sequence windows examined were skipped because they exclusively contained 'N' bases
 50 of 240 / 20.8333% of sequence windows examined failed because they contained prohibited sequences
-0 of 240 / 0.0000% of sequence windows examined failed because the Tm was below 0
+0 of 240 / 0.0000% of sequence windows examined failed because the Tm was below 20
 0 of 240 / 0.0000% of sequence windows examined failed because the Tm was above 100
 0 of 240 / 0.0000% of sequence windows examined failed because the %G+C was below 25
 58 of 240 / 24.1667% of sequence windows examined failed because the %G+C was above 75

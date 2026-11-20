@@ -79,7 +79,7 @@ Turn this to False when your template is not found in database (e.g. GFP).
 `export_blast`
 Optional, default False. Set export_blast True to save two debugging files next to the input fasta file. Neither is needed for the oligo design.
 
-`<fasta basename>_blast.csv` is the raw BLAST result: the 12 standard BLAST columns plus `self_hit`, which is True for hits on the template gene. Rows with `self_hit` True are excluded from the off-target analysis. All values are False when self_remove is False.
+`<fasta basename>_blast.csv` is the raw BLAST result: the 12 standard BLAST columns plus `self_hit`, which is True for hits on the template gene, and `short_hit`, which is True for hits shorter than `minimum_offtarget_homology`. Rows with either flag True are excluded from the off-target analysis. `self_hit` is all False when self_remove is False; `short_hit` is all False when minimum_offtarget_homology is 0.
 
 `<fasta basename>_offtarget_screening.csv` is the log of the BLAST off-target screening. It lists every candidate oligo produced by OligoMiner, in the same orientation and with the same leading columns (`gene, oligo_id, seq, start, end`) as the oligo set csv, followed by the BLAST verdict:
 - `excluded`: True if the oligo was removed. An oligo is removed when it and another candidate bind the same non-self transcript within `minimum_offtarget_gap`, because such a pair of split probes could initiate HCR on that transcript.
@@ -87,6 +87,16 @@ Optional, default False. Set export_blast True to save two debugging files next 
 - `exclusion_partner`, `exclusion_gap`: the other oligo(s) of the pair and the distance between the two binding sites, measured from the start of one site to the end of the other (the value compared against `minimum_offtarget_gap`).
 - `n_offtarget_hits`, `n_offtarget_transcripts`, `offtarget_sseqids`: how many non-self BLAST hits the oligo has, how many distinct transcripts they fall on, and the list of those transcripts (`;`-separated).
 - `n_self_hits`: number of BLAST hits on the template gene.
+- `n_short_hits`: number of non-self BLAST hits ignored because they are shorter than `minimum_offtarget_homology`.
+
+### Advanced parameters for the off-target BLAST
+The off-target screening runs `blastn -task blastn-short` on the plus strand. The settings that blastn applies implicitly for that task (word_size 7, evalue 10, reward 1, penalty -3, gapopen 5, gapextend 2 in BLAST+ 2.13.0) are passed explicitly, so the result does not depend on the defaults of the installed BLAST version. With these settings the shortest hit reported for a 20-mer against a transcriptome database is about 14 nt; hits shorter than `minimum_offtarget_homology` (default 15) are then ignored. The values actually used are written to `<fasta basename>_parameters.csv`. Two optional keys of `mFISH3D_param` control this step:
+
+`minimum_offtarget_homology`
+Optional, default 15. BLAST hits whose alignment length is shorter than this many bases are ignored in the off-target analysis, e.g. `'minimum_offtarget_homology': 16`. Set 0 to disable the filter. The alignment length counts mismatches and gaps, so a 16 nt alignment with 2 mismatches passes a threshold of 15.
+
+`blast_options`
+Optional. A dict of blastn options merged over the pinned blastn-short settings, with the option names as keys without the leading dash, e.g. `'blast_options': {'evalue': 1000}`. Lowering evalue or raising word_size reports fewer and longer hits; raising evalue reports shorter hits (down to about 13 nt at evalue 1000).
 
 
 

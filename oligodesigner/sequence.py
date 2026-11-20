@@ -43,9 +43,25 @@ def check_refseqid_exist(fasta, return_entrezid=True):
         return refseqid
 
 
-def run_blast(input_file, output_file, database, task='blastn-short', strand='plus', num_threads=1):
+# Settings that blastn applies implicitly for `-task blastn-short` (verified with BLAST+ 2.13.0).
+# They are passed explicitly so that the off-target screening does not depend on the defaults of the
+# installed BLAST version. Note that the command-line default e-value is 10, not the 1000 quoted for
+# the NCBI web interface; with these scores a 20-mer against a transcriptome yields hits of >= ~14 nt.
+BLASTN_SHORT_OPTIONS = {
+    'word_size': 7,
+    'evalue': 10,
+    'reward': 1,
+    'penalty': -3,
+    'gapopen': 5,
+    'gapextend': 2,
+}
+
+
+def run_blast(input_file, output_file, database, task='blastn-short', strand='plus', num_threads=1,
+              **blast_options):
     """
     run blast against transcriptome database. negative_seqid option does not work for an unknown reason.
+    Extra keyword arguments (e.g. evalue=10, word_size=7) are passed to blastn as is.
     """
     blastn_cline = NcbiblastnCommandline(
         task=task,
@@ -54,12 +70,17 @@ def run_blast(input_file, output_file, database, task='blastn-short', strand='pl
         num_threads=num_threads,
         strand=strand,
         outfmt='10 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore',
-        out=output_file
+        out=output_file,
+        **blast_options
     )
     stdout, stderr = blastn_cline()
 
 
-def run_blast_df(input_file, database, task='blastn-short', strand='plus', num_threads=1):
+def run_blast_df(input_file, database, task='blastn-short', strand='plus', num_threads=1, **blast_options):
+    """
+    run blast and return the tabular result as a dataframe.
+    Extra keyword arguments (e.g. evalue=10, word_size=7) are passed to blastn as is.
+    """
     blastn_cline = NcbiblastnCommandline(
         task=task,
         query=input_file,
@@ -67,7 +88,8 @@ def run_blast_df(input_file, database, task='blastn-short', strand='plus', num_t
         num_threads=num_threads,
         strand=strand,
         outfmt='6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore',
-        out='-'
+        out='-',
+        **blast_options
     )
     output = blastn_cline()[0].strip()
     rows = [line.split() for line in output.splitlines()]
@@ -229,39 +251,45 @@ def get_off_targeting_oligo(minimum_offtarget_gap, df_blast):
     return oligo_to_be_removed
 
 
-def candidate_report(oligominer_df, df_blast, self_hit, detail_df):
+def candidate_report(oligominer_df, df_blast, self_hit, detail_df, short_hit=None):
     """
     Build a debugging table with one row per OligoMiner candidate, in the same orientation and
     with the same leading columns as the oligo set csv, followed by the BLAST verdict.
 
     Arguments:
         oligominer_df: dataframe from io.dataframe_from_oligominer (target orientation).
-        df_blast: the full BLAST result (before self hits are removed).
+        df_blast: the full BLAST result (before self hits and short hits are removed).
         self_hit: boolean Series aligned to df_blast, True for hits on the gene of interest.
         detail_df: second return value of get_off_targeting_oligo_detail.
+        short_hit: optional boolean Series aligned to df_blast, True for hits shorter than
+            minimum_offtarget_homology. These are not counted as off-target hits.
 
     Columns:
         gene, oligo_id, seq (probe orientation), start, end,
         excluded, exclusion_sseqid, exclusion_sstart, exclusion_send, exclusion_partner, exclusion_gap,
-        n_offtarget_hits, n_offtarget_transcripts, offtarget_sseqids (';'-joined), n_self_hits
+        n_offtarget_hits, n_offtarget_transcripts, offtarget_sseqids (';'-joined), n_self_hits, n_short_hits
     """
+    if short_hit is None:
+        short_hit = pd.Series(False, index=df_blast.index, name='short_hit')
+
     report = oligominer_df.copy()
     report['seq'] = report['seq'].apply(lambda x: str(x.reverse_complement()))
 
     report['excluded'] = report['oligo_id'].isin(detail_df['oligo_id'])
     report = report.merge(detail_df, on='oligo_id', how='left')
 
-    offtarget = df_blast[~self_hit]
+    offtarget = df_blast[~self_hit & ~short_hit]
     grouped = offtarget.groupby('qseqid')['sseqid']
     n_hits = grouped.size().rename('n_offtarget_hits')
     n_transcripts = grouped.nunique().rename('n_offtarget_transcripts')
     sseqids = grouped.apply(lambda s: ';'.join(s.drop_duplicates())).rename('offtarget_sseqids')
     n_self = df_blast[self_hit].groupby('qseqid').size().rename('n_self_hits')
+    n_short = df_blast[short_hit & ~self_hit].groupby('qseqid').size().rename('n_short_hits')
 
-    summary = pd.concat([n_hits, n_transcripts, sseqids, n_self], axis=1)
+    summary = pd.concat([n_hits, n_transcripts, sseqids, n_self, n_short], axis=1)
     report = report.merge(summary, left_on='oligo_id', right_index=True, how='left')
 
-    for col in ['n_offtarget_hits', 'n_offtarget_transcripts', 'n_self_hits']:
+    for col in ['n_offtarget_hits', 'n_offtarget_transcripts', 'n_self_hits', 'n_short_hits']:
         report[col] = report[col].fillna(0).astype(int)
     report['offtarget_sseqids'] = report['offtarget_sseqids'].fillna('')
     report['exclusion_partner'] = report['exclusion_partner'].fillna('')
